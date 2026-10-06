@@ -256,15 +256,17 @@ client.once(Events.ClientReady, async (c) => {
     console.error(`[deploy GAGAL] command tidak terdaftar: ${err.message}`);
   }
 
-  // Identitas global: tampilan bot di Discord harus "Atheris". Dicek dulu supaya tidak
-  // nembak API tiap restart; gagal = log saja, restart tidak boleh batal karena kosmetik.
+  // Identitas bot: handle "atheris" (Discord maksa huruf kecil) + nickname server
+  // "Atheris" (lihat di loop guild bawah) — global_name TIDAK berlaku buat akun bot:
+  // API terima 200 tapi nilainya tetap null. Cek dulu supaya tidak nembak API tiap
+  // restart; gagal = log saja, restart tidak boleh batal karena kosmetik.
   try {
-    if (c.user.globalName !== 'Atheris') {
-      await c.user.setGlobalName('Atheris');
-      console.log('[identity] display name -> Atheris');
+    if (c.user.username !== 'atheris') {
+      await c.user.setUsername('atheris');
+      console.log('[identity] username -> atheris');
     }
   } catch (err) {
-    console.warn(`[identity] gagal set display name: ${err.message}`);
+    console.warn(`[identity] gagal set username: ${err.message}`);
   }
 
   // Katalog D&D dimuat di background: kalau API-nya mati, role bot tetap harus jalan.
@@ -282,17 +284,22 @@ client.once(Events.ClientReady, async (c) => {
       console.warn(`[warn] guild "${guild.name}": role bot "${me.name}" ada di posisi terendah — role baru tidak akan bisa diberikan ke member.`);
     }
 
-    // Seragamkan gelar role bot: "Knight Aetheris" -> "Knight Atheris". Nama lain tidak
-    // disentuh (bisa saja admin ganti nama role sendiri).
-    if (me.name === 'Knight Aetheris') {
-      try {
-        await me.setName('Knight Atheris');
-        console.log(`[identity] role bot "${guild.name}" -> Knight Atheris`);
-      } catch (err) {
-        console.warn(`[identity] gagal rename role: ${err.message}`);
+    // Role tertinggi bot TIDAK bisa diedit oleh bot sendiri (Discord cuma mengizinkan
+    // role di bawah tertinggi -> selalu 403 Missing Permissions). Rename "Knight Aetheris"
+    // -> "Knight Atheris" harus manual sekali di Server Settings -> Roles; baris ini
+    // cuma supaya kelihatan di log kalau belum cocok.
+    if (me.name !== 'Knight Atheris') {
+      console.warn(`[identity] role tertinggi "${me.name}" bukan "Knight Atheris" — rename manual di Server Settings → Roles.`);
+    }
+
+    // Yang bikin bot tampil "Atheris" buat player: nickname di server ini.
+    try {
+      if (guild.members.me?.nickname !== 'Atheris') {
+        await guild.members.me.setNickname('Atheris');
+        console.log(`[identity] nickname "${guild.name}" -> Atheris`);
       }
-    } else if (me.name !== 'Knight Atheris') {
-      console.warn(`[identity] role tertinggi "${me.name}" bukan varian Knight Aetheris/Atheris — tidak disentuh.`);
+    } catch (err) {
+      console.warn(`[identity] gagal set nickname: ${err.message}`);
     }
 
     // rest.retries:0 mematikan retry bawaan @discordjs/rest, jadi di titik yang tidak
