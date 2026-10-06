@@ -1,0 +1,18 @@
+{
+  "name": "aetheris",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Aetheris — The Fallen Shield: bot self-role Discord via katalog rules-roles",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env index.js",
+    "dev": "node --watch --env-file-if-exists=.env index.js",
+    "test": "node --test test/"
+  },
+  "dependencies": {
+    "discord.js": "^14.21.0"
+  },
+  "engines": {
+    "node": ">=20.6.0"
+  }
+}
