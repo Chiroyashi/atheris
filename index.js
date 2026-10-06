@@ -116,6 +116,26 @@ function catalogRows(idx) {
 
 const catalogPayload = (idx) => ({ embeds: [catalogPage(idx)], components: catalogRows(idx) });
 
+// Pesan panduan: menjelaskan buat apa role katalog dan buat apa /myrole remove,
+// gaya cerita ringan tapi tetap jelas buat player baru.
+function infoPayload() {
+  const embed = new EmbedBuilder()
+    .setTitle('📜 Panduan Katalog Role')
+    .setColor(0x8b9dc3)
+    .addFields(
+      {
+        name: 'Role di sini untuk apa?',
+        value: 'Setiap role adalah **gelar kehormatan** yang menempel di namamu di daftar member (tampil menonjol, warna terang) — penanda peran yang kamu pilih sendiri: Builder, Miner, Farmer, dan lainnya. Pilih lewat select di bawah; **maksimal 1 gelar** — ambil yang baru, yang lama otomatis terlepas. Gelar ini terbuka: pemain lain boleh memakai gelar yang sama.',
+      },
+      {
+        name: '`/myrole remove` untuk apa?',
+        value: 'Untuk **melepas gelar dari dirimu sendiri** — meletakkan titel kembali ke rak, tanpa merusak milik orang lain. Role tidak dihapus dari server; pemain lain tetap memilikinya, dan kamu bisa mengambilnya lagi kapan saja.',
+      },
+    )
+    .setFooter({ text: 'Aetheris • panduan' });
+  return { embeds: [embed] };
+}
+
 // Kontrak role yang dibuat bot: hoist, tanpa permission, posisi 1 (tepat di atas
 // @everyone). Posisi bawah supaya admin kecil mana pun (role di atas posisi 1)
 // bisa menghapus/mengubah role ini — bukan cuma owner. Role tetap di bawah role
@@ -137,23 +157,23 @@ async function createGuildRole(guild, name) {
 
 const findRole = (guild, name) => guild.roles.cache.find((r) => r.name === name);
 
-// Dipublish ulang tiap start: pesan lama di-edit, bukan dikirim lagi, jadi restart tidak spam.
-// Kalau user hapus pesannya, `messages.fetch` gagal -> kirim ulang & simpan id baru.
-// Ini pesan utama bot di channel: sekali gagal = channel kosong sampai restart, jadi
-// percobaannya banyak (bukan `first()` 3 detik, di sini tidak ada deadline interaksi).
-async function publishCatalog(guild, chan) {
-  await retry('publish katalog', async () => {
-    const payload = catalogPayload(0);
-    const previous = store.data.catalogMessageId;
-    if (previous) {
-      const old = await chan.messages.fetch(previous).catch(() => null);
-      if (old) return void (await old.edit(payload));
-    }
-    const sent = await chan.send(payload);
-    store.data.catalogMessageId = sent.id;
-    store.save();
-  }, 10);
+// Sekali kirim, start berikutnya edit-in-place — restart tidak spam. ID tidak disimpan
+// di data.json (di Render file ini hilang tiap restart -> ID ikut hilang -> tiap deploy
+// kirim pesan baru yang duplikat); pesan lama dicari lewat footer marker, jadi punya
+// dari run sebelumnya pun ketemu & ke-edit. Ini pesan utama bot di channel: sekali
+// gagal = channel kosong sampai restart, jadi percobaannya banyak.
+async function publishOnce(chan, payload, isTarget) {
+  const msgs = await chan.messages.fetch({ limit: 25 });
+  const existing = msgs.find((m) => m.author.id === client.user.id && isTarget(m.embeds[0]?.footer?.text ?? ''));
+  if (existing) return void (await existing.edit(payload));
+  await chan.send(payload);
 }
+
+// Kedua pesan dikelola bot memakai awalan footer yang sama; panduan dibedakan suffix-nya.
+const isKatalog = (t) => t.startsWith('Aetheris •') && !t.startsWith('Aetheris • panduan');
+const isPanduan = (t) => t.startsWith('Aetheris • panduan');
+
+const publishCatalog = (chan) => retry('publish katalog', () => publishOnce(chan, catalogPayload(0), isKatalog), 10);
 
 // Select = ambil/lepas role, sekalian geser halaman ke role itu. Karena `slow()` di sini
 // deferUpdate, `say()` akan menimpa pesan katalog dengan teks — makanya konfirmasinya
@@ -236,6 +256,17 @@ client.once(Events.ClientReady, async (c) => {
     console.error(`[deploy GAGAL] command tidak terdaftar: ${err.message}`);
   }
 
+  // Identitas global: tampilan bot di Discord harus "Atheris". Dicek dulu supaya tidak
+  // nembak API tiap restart; gagal = log saja, restart tidak boleh batal karena kosmetik.
+  try {
+    if (c.user.globalName !== 'Atheris') {
+      await c.user.setGlobalName('Atheris');
+      console.log('[identity] display name -> Atheris');
+    }
+  } catch (err) {
+    console.warn(`[identity] gagal set display name: ${err.message}`);
+  }
+
   // Katalog D&D dimuat di background: kalau API-nya mati, role bot tetap harus jalan.
   loadCatalog()
     .then(() => console.log(`[dnd] katalog siap: ${list('monsters').length} monster, ${list('spells').length} spell`))
@@ -251,12 +282,30 @@ client.once(Events.ClientReady, async (c) => {
       console.warn(`[warn] guild "${guild.name}": role bot "${me.name}" ada di posisi terendah — role baru tidak akan bisa diberikan ke member.`);
     }
 
+    // Seragamkan gelar role bot: "Knight Aetheris" -> "Knight Atheris". Nama lain tidak
+    // disentuh (bisa saja admin ganti nama role sendiri).
+    if (me.name === 'Knight Aetheris') {
+      try {
+        await me.setName('Knight Atheris');
+        console.log(`[identity] role bot "${guild.name}" -> Knight Atheris`);
+      } catch (err) {
+        console.warn(`[identity] gagal rename role: ${err.message}`);
+      }
+    } else if (me.name !== 'Knight Atheris') {
+      console.warn(`[identity] role tertinggi "${me.name}" bukan varian Knight Aetheris/Atheris — tidak disentuh.`);
+    }
+
     // rest.retries:0 mematikan retry bawaan @discordjs/rest, jadi di titik yang tidak
     // punya deadline 3 detik (startup, dan edit setelah interact) retry kita sendiri.
     const chan = await retry('fetch rules-roles', () => guild.channels.fetch(RULES_CHANNEL_ID))
       .catch(() => null);
-    if (chan) await publishCatalog(guild, chan).catch((err) => console.error(`[catalog GAGAL] ${err.message}`));
-    else console.warn(`[warn] channel rules-roles "${RULES_CHANNEL_ID}" tidak bisa diakses bot.`);
+    if (chan) {
+      // Panduan dipublish duluan biar muncul di atas katalog — urutan hanya dijamin
+      // saat pesan baru dibuat; kalau udah ada, masing-masing tetap di tempatnya.
+      await retry('publish panduan', () => publishOnce(chan, infoPayload(), isPanduan), 10)
+        .catch((err) => console.error(`[panduan GAGAL] ${err.message}`));
+      await publishCatalog(chan).catch((err) => console.error(`[catalog GAGAL] ${err.message}`));
+    } else console.warn(`[warn] channel rules-roles "${RULES_CHANNEL_ID}" tidak bisa diakses bot.`);
   }
   console.log(`[ready] Aetheris online sebagai ${c.user.tag}`);
 });
