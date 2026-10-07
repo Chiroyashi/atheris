@@ -495,10 +495,17 @@ client.on(Events.Error, (err) => console.error('[ws error]', err));
 // Gate sebelum login: selama /gateway/bot masih bukan 200, JANGAN panggil login.
 // discord.js menangani 429 dengan sleep(retryAfter) + request ulang tanpa batas di
 // dalam promise login (lihat @discordjs/rest runRequest), jadi proses menggantung
-// tanpa log apa pun sampai watchdog membunuhnya — lalu boot berikutnya langsung
-// menembak endpoint yang sama lagi, dan rate limit-nya justru dirawat loop-nya sendiri.
-// Di sini kita tunggu dulu dengan jeda yang kelihatan di log; login hanya dipanggil
-// kalau endpoint-nya sudah sehat.
+// tanpa log apa pun sampai watchdog membunuhnya.
+// 429 di sini bukan rate limit route (bukti: token yang sama dari mesin lain 200) —
+// ini penalty IP egress Render, waktunya hitungan JAM. Karena itu:
+//   1. `retry-after` dihormati penuh, tidak dipotong 120s. Menelepon ulang sebelum
+//      waktunya justru me-refresh penalty-nya, dan exit->restart->probe = storm yang
+//      membuatnya tidak pernah selesai.
+//   2. Tidak ada exit selama kena 429. Proses tetap hidup, health tetap 503 (jangan
+//      di-set jadi Health Check Path di Render), UptimeRobot teriak, begitu limit lewat
+//      boot berikutnya lanjut sendiri.
+// Body ikut di-log: JSON berarti throttled biasa, HTML berarti Cloudflare ban IP —
+// keduanya butuh sikap beda (tunggu vs pindah host).
 for (let n = 1; ; n++) {
   let status = 0;
   let wait = Math.min(30_000 * n, 120_000);
@@ -514,14 +521,11 @@ for (let n = 1; ; n++) {
       break;
     }
     const retryAfter = Number(res.headers.get('retry-after'));
-    if (Number.isFinite(retryAfter) && retryAfter > 0) wait = Math.min(retryAfter * 1000, 120_000);
-    detail = ` retry-after=${res.headers.get('retry-after') ?? '-'} scope=${res.headers.get('x-ratelimit-scope') ?? '-'}`;
+    if (status === 429 && Number.isFinite(retryAfter) && retryAfter > 0) wait = retryAfter * 1000;
+    const body = await res.text().catch(() => '');
+    detail = ` retry-after=${res.headers.get('retry-after') ?? '-'} scope=${res.headers.get('x-ratelimit-scope') ?? '-'} body=${JSON.stringify(body.slice(0, 160))}`;
   } catch (err) {
     detail = ` ${err.message}`;
-  }
-  if (n >= 30) {
-    console.error('[fatal] /gateway/bot masih tidak sehat setelah ~30 menit — exit untuk percobaan baru');
-    process.exit(1);
   }
   console.warn(`[gate] /gateway/bot HTTP ${status}${detail} — tunggu ${Math.round(wait / 1000)}s (percobaan ${n})`);
   await sleep(wait);
