@@ -56,18 +56,18 @@ const notify = (i, content) => retry('followUp', () => i.followUp({ content, ...
 const COMMANDS = [
   {
     name: 'myrole',
-    description: 'Role milikmu sendiri dari katalog Aetheris',
+    description: 'Role milikmu sendiri dari katalog Atheris',
     options: [
       { name: 'list', description: 'Role milikmu', type: Opt.Subcommand, options: [] },
       {
         name: 'remove',
-        description: 'Lepas role yang diambil dari katalog Aetheris',
+        description: 'Lepas role yang diambil dari katalog Atheris',
         type: Opt.Subcommand,
         options: [{ name: 'role', description: 'Role yang mau dilepas', type: Opt.Role, required: true }],
       },
     ],
   },
-  { name: 'storyaetheris', description: 'Kisah Aetheris, sang Fallen Shield', options: [] },
+  { name: 'storyatheris', description: 'Kisah Atheris, sang Fallen Shield', options: [] },
   {
     name: 'monster',
     description: 'Kartu monster dari D&D 5e SRD (acak kalau nama dikosongkan)',
@@ -81,7 +81,7 @@ const COMMANDS = [
   { name: 'encounter', description: 'Susun encounter dari 3 monster acak', options: [] },
 ];
 
-const STORY = `**Aetheris** adalah ksatria sejati penakluk Ender Dragon di The End Void. Kemenangan agungnya berubah menjadi tragedi saat ia dikhianati bangsawan rival: rumahnya dijarah, istrinya dibunuh, dan gelarnya dicuri demi politik. Dibiarkan tewas, sisa energi kehampaan membangkitkannya kembali sebagai *"The Fallen Shield"*, ksatria bayangan yang kini meminta entitas baru \`player\` untuk kembalikan dunianya.`;
+const STORY = `**Atheris** adalah ksatria sejati penakluk Ender Dragon di The End Void. Kemenangan agungnya berubah menjadi tragedi saat ia dikhianati bangsawan rival: rumahnya dijarah, istrinya dibunuh, dan gelarnya dicuri demi politik. Dibiarkan tewas, sisa energi kehampaan membangkitkannya kembali sebagai *"The Fallen Shield"*, ksatria bayangan yang kini meminta entitas baru \`player\` untuk kembalikan dunianya.`;
 
 // Satu halaman = satu role. Select di baris atas, tombol next/previous di baris bawah
 // (select harus sendirian satu baris).
@@ -91,7 +91,7 @@ function catalogPage(idx) {
     .setTitle(c.full)
     .setColor(0xffffff)
     .addFields({ name: 'Lore', value: c.lore }, { name: '↳ Tugas', value: c.duty })
-    .setFooter({ text: `Aetheris • ${idx + 1}/${CATALOG.length} • pilih role dari select di bawah` });
+    .setFooter({ text: `Atheris • ${idx + 1}/${CATALOG.length} • pilih role dari select di bawah` });
 }
 
 function catalogRows(idx) {
@@ -132,7 +132,7 @@ function infoPayload() {
         value: 'Untuk **melepas gelar dari dirimu sendiri** — meletakkan titel kembali ke rak, tanpa merusak milik orang lain. Role tidak dihapus dari server; pemain lain tetap memilikinya, dan kamu bisa mengambilnya lagi kapan saja.',
       },
     )
-    .setFooter({ text: 'Aetheris • panduan' });
+    .setFooter({ text: 'Atheris • panduan' });
   return { embeds: [embed] };
 }
 
@@ -170,8 +170,12 @@ async function publishOnce(chan, payload, isTarget) {
 }
 
 // Kedua pesan dikelola bot memakai awalan footer yang sama; panduan dibedakan suffix-nya.
-const isKatalog = (t) => t.startsWith('Aetheris •') && !t.startsWith('Aetheris • panduan');
-const isPanduan = (t) => t.startsWith('Aetheris • panduan');
+// Prefix lama "Aetheris •" tetap dikenali supaya pesan yang sudah terpublish di-edit
+// in-place (bukan dikirim ulang/duplikat); begitu ke-edit, footer-nya migrasi ke
+// "Atheris •".
+const MARKER = /^(Atheris|Aetheris) •/;
+const isPanduan = (t) => MARKER.test(t) && t.endsWith('panduan');
+const isKatalog = (t) => MARKER.test(t) && !isPanduan(t);
 
 const publishCatalog = (chan) => retry('publish katalog', () => publishOnce(chan, catalogPayload(0), isKatalog), 10);
 
@@ -285,7 +289,7 @@ client.once(Events.ClientReady, async (c) => {
     }
 
     // Role tertinggi bot TIDAK bisa diedit oleh bot sendiri (Discord cuma mengizinkan
-    // role di bawah tertinggi -> selalu 403 Missing Permissions). Rename "Knight Aetheris"
+    // role di bawah tertinggi -> selalu 403 Missing Permissions). Rename "Knight Atheris"
     // -> "Knight Atheris" harus manual sekali di Server Settings -> Roles; baris ini
     // cuma supaya kelihatan di log kalau belum cocok.
     if (me.name !== 'Knight Atheris') {
@@ -314,14 +318,14 @@ client.once(Events.ClientReady, async (c) => {
       await publishCatalog(chan).catch((err) => console.error(`[catalog GAGAL] ${err.message}`));
     } else console.warn(`[warn] channel rules-roles "${RULES_CHANNEL_ID}" tidak bisa diakses bot.`);
   }
-  console.log(`[ready] Aetheris online sebagai ${c.user.tag}`);
+  console.log(`[ready] Atheris online sebagai ${c.user.tag}`);
 });
 
 client.on(Events.InteractionCreate, async (i) => {
   try {
     if (i.isChatInputCommand()) {
       if (!i.guild) return say(i, 'Perintah ini hanya bisa dipakai di dalam server.');
-      if (i.commandName === 'storyaetheris') return tellStory(i);
+      if (i.commandName === 'storyatheris') return tellStory(i);
       if (i.commandName === 'monster') return await showMonster(i);
       if (i.commandName === 'spell') return await showSpell(i);
       if (i.commandName === 'encounter') return await showEncounter(i);
@@ -350,7 +354,7 @@ function tellStory(i) {
   return i.reply({
     embeds: [
       new EmbedBuilder()
-        .setTitle('⚔️ Aetheris — The Fallen Shield')
+        .setTitle('⚔️ Atheris — The Fallen Shield')
         .setDescription(STORY)
         .setColor(0x8b9dc3)
         .setFooter({ text: 'The End Void • kisahnya belum selesai' }),
@@ -411,7 +415,7 @@ async function showEncounter(i) {
 async function listRoles(i) {
   const mine = store.byUser(i.user.id, i.guildId);
   const lines = [];
-  if (mine.length === 0) return say(i, 'Kamu belum pernah ambil role dari Aetheris. Pilih role dari katalog di channel rules-roles.');
+    if (mine.length === 0) return say(i, 'Kamu belum pernah ambil role dari Atheris. Pilih role dari katalog di channel rules-roles.');
 
   for (const r of mine.slice(-10).reverse()) {
     const icon = r.status === 'granted' ? r.name : `⏳ ${r.name}`;
@@ -424,9 +428,9 @@ async function removeRole(i) {
   const role = i.options.getRole('role');
   const owned = store.grantedRoles(i.user.id, i.guildId).find((r) => r.roleId === role.id);
   // Role katalog juga boleh dilepas walau tidak ada record (dipilih sebelum
-  // grantCatalog ada) — cukup namanya memang dari katalog Aetheris.
+  // grantCatalog ada) — cukup namanya memang dari katalog Atheris.
   const fromCatalog = CATALOG.some((c) => c.discord === role.name);
-  if (!owned && !fromCatalog) return say(i, 'Role itu bukan dibuat lewat Aetheris, jadi aku tidak bisa melepaskannya.');
+  if (!owned && !fromCatalog) return say(i, 'Role itu bukan dibuat lewat Atheris, jadi aku tidak bisa melepaskannya.');
 
   // members.fetch + roles.remove = 2 request berturut-turut; tanpa defer ini lewat 3 detik.
   await slow(i);

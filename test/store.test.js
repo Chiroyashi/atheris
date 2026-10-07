@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createStore } from '../store.js';
 
-const newStore = () => createStore(join(mkdtempSync(join(tmpdir(), 'aetheris-')), 'data.json'));
+const newStore = () => createStore(join(mkdtempSync(join(tmpdir(), 'atheris-')), 'data.json'));
 
 test('grantCatalog mencatat role katalog supaya /myrole remove kenal', () => {
   const store = newStore();
