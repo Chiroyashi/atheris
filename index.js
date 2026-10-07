@@ -482,6 +482,25 @@ const watchdog = setTimeout(() => {
 }, 90_000);
 client.once(Events.ClientReady, () => clearTimeout(watchdog));
 
+// Diagnosa boot: log gateway Discord selama sebelum ready saja (heartbeat bikin banjir
+// kalau dibiarkan), plus warn/error client yang jarang tapi selalu penting.
+client.on(Events.Debug, (msg) => { if (!client.isReady()) console.log('[debug]', msg); });
+client.on(Events.Warn, (msg) => console.warn('[ws warn]', msg));
+client.on(Events.Error, (err) => console.error('[ws error]', err));
+
+// Probe jaringan sebelum login. Login menggantung tanpa error = TCP ke gateway mati;
+// baris ini bedain "discord.com terjangkau tapi gateway.discord.gg menggantung" dari
+// "keduanya mati dari Render". 5 detik cukup — lebih lama dari itu memang sudah hang.
+for (const url of ['https://discord.com/api/v10/gateway', 'https://gateway.discord.gg/']) {
+  const t = Date.now();
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+    console.log(`[probe] ${url} -> HTTP ${res.status} (${Date.now() - t}ms)`);
+  } catch (err) {
+    console.log(`[probe] ${url} GAGAL: ${err.message} (${Date.now() - t}ms)`);
+  }
+}
+
 retry('login', () => client.login(TOKEN), 20).catch((err) => {
   console.error(`[fatal] gagal login: ${err.message}`);
   process.exit(1);
