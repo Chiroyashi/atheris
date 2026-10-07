@@ -258,6 +258,9 @@ client.once(Events.ClientReady, async (c) => {
     console.log(`[deploy] ${registered.length} command terdaftar di guild ${GUILD_ID}`);
   } catch (err) {
     console.error(`[deploy GAGAL] command tidak terdaftar: ${err.message}`);
+    // Command basi selamanya kalau cuma di-log (bukti: storyaetheris masih terdaftar
+    // setelah rename). Exit -> Render restart -> deploy ulang.
+    process.exit(1);
   }
 
   // Identitas bot: handle "atheris" (Discord maksa huruf kecil) + nickname server
@@ -415,7 +418,7 @@ async function showEncounter(i) {
 async function listRoles(i) {
   const mine = store.byUser(i.user.id, i.guildId);
   const lines = [];
-    if (mine.length === 0) return say(i, 'Kamu belum pernah ambil role dari Atheris. Pilih role dari katalog di channel rules-roles.');
+  if (mine.length === 0) return say(i, 'Kamu belum pernah ambil role dari Atheris. Pilih role dari katalog di channel rules-roles.');
 
   for (const r of mine.slice(-10).reverse()) {
     const icon = r.status === 'granted' ? r.name : `⏳ ${r.name}`;
@@ -442,9 +445,14 @@ async function removeRole(i) {
   await say(i, `Role **${role.name}** dilepas.`);
 }
 
+// Health endpoint harus jujur: kalau selalu "ok", UptimeRobot puas padahal gateway
+// mati dan kamu tidak pernah dapat notifikasi. 503 saat bot belum ready = alert
+// UptimeRobot menyala dan mati lagi saat pulih. Jangan di-set sebagai Health Check
+// Path di Render (deploy akan dianggap gagal saat bot masih boot).
 http.createServer((req, res) => {
-  res.writeHead(200, { 'content-type': 'text/plain' });
-  res.end('ok');
+  const ok = client.isReady();
+  res.writeHead(ok ? 200 : 503, { 'content-type': 'text/plain' });
+  res.end(ok ? 'ok' : 'starting');
 }).listen(PORT, () => console.log(`[http] http://localhost:${PORT} (untuk UptimeRobot)`));
 
 for (const sig of ['SIGINT', 'SIGTERM']) {
@@ -462,6 +470,18 @@ process.on('uncaughtException', (err) => console.error('[uncaughtException]', er
 // 20 percobaan dengan jeda 2-40 detik = menahan outage sekitar 7 menit. Default 5 hanya
 // bertahan ~20 detik, lalu `process.exit(1)` mematikan bot permanen padahal penyebabnya
 // cuma jaringan — token-nya masih valid.
+// Watchdog: retry('login') hanya menangani error; kalau koneksi menggantung tanpa
+// error (kasus deploy 7 Okt: log berhenti setelah [http], tanpa [ready] dan tanpa
+// [retry]), proses hidup tapi bot mati diam-diam selamanya. Belum ready dalam 90s
+// = exit(1), Render restart dengan percobaan jaringan baru.
+const watchdog = setTimeout(() => {
+  if (!client.isReady()) {
+    console.error('[fatal] belum ready dalam 90s — restart proses');
+    process.exit(1);
+  }
+}, 90_000);
+client.once(Events.ClientReady, () => clearTimeout(watchdog));
+
 retry('login', () => client.login(TOKEN), 20).catch((err) => {
   console.error(`[fatal] gagal login: ${err.message}`);
   process.exit(1);
