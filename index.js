@@ -473,14 +473,18 @@ process.on('uncaughtException', (err) => console.error('[uncaughtException]', er
 // Watchdog: retry('login') hanya menangani error; kalau koneksi menggantung tanpa
 // error (kasus deploy 7 Okt: log berhenti setelah [http], tanpa [ready] dan tanpa
 // [retry]), proses hidup tapi bot mati diam-diam selamanya. Belum ready dalam 90s
-// = exit(1), Render restart dengan percobaan jaringan baru.
-const watchdog = setTimeout(() => {
-  if (!client.isReady()) {
-    console.error('[fatal] belum ready dalam 90s — restart proses');
-    process.exit(1);
-  }
-}, 90_000);
-client.once(Events.ClientReady, () => clearTimeout(watchdog));
+// = exit(1), Render restart dengan percobaan jaringan baru. Dipasang SETELAH gate
+// di bawah — fase nunggu rate limit itu sah berlangsung >90 detik dan tidak boleh
+// dibunuh watchdog.
+const armWatchdog = () => {
+  const t = setTimeout(() => {
+    if (!client.isReady()) {
+      console.error('[fatal] belum ready dalam 90s — restart proses');
+      process.exit(1);
+    }
+  }, 90_000);
+  client.once(Events.ClientReady, () => clearTimeout(t));
+};
 
 // Diagnosa boot: log gateway Discord selama sebelum ready saja (heartbeat bikin banjir
 // kalau dibiarkan), plus warn/error client yang jarang tapi selalu penting.
@@ -488,18 +492,42 @@ client.on(Events.Debug, (msg) => { if (!client.isReady()) console.log('[debug]',
 client.on(Events.Warn, (msg) => console.warn('[ws warn]', msg));
 client.on(Events.Error, (err) => console.error('[ws error]', err));
 
-// Probe jaringan sebelum login. Login menggantung tanpa error = TCP ke gateway mati;
-// baris ini bedain "discord.com terjangkau tapi gateway.discord.gg menggantung" dari
-// "keduanya mati dari Render". 5 detik cukup — lebih lama dari itu memang sudah hang.
-for (const url of ['https://discord.com/api/v10/gateway', 'https://gateway.discord.gg/']) {
-  const t = Date.now();
+// Gate sebelum login: selama /gateway/bot masih bukan 200, JANGAN panggil login.
+// discord.js menangani 429 dengan sleep(retryAfter) + request ulang tanpa batas di
+// dalam promise login (lihat @discordjs/rest runRequest), jadi proses menggantung
+// tanpa log apa pun sampai watchdog membunuhnya — lalu boot berikutnya langsung
+// menembak endpoint yang sama lagi, dan rate limit-nya justru dirawat loop-nya sendiri.
+// Di sini kita tunggu dulu dengan jeda yang kelihatan di log; login hanya dipanggil
+// kalau endpoint-nya sudah sehat.
+for (let n = 1; ; n++) {
+  let status = 0;
+  let wait = Math.min(30_000 * n, 120_000);
+  let detail = '';
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
-    console.log(`[probe] ${url} -> HTTP ${res.status} (${Date.now() - t}ms)`);
+    const res = await fetch('https://discord.com/api/v10/gateway/bot', {
+      headers: { Authorization: `Bot ${TOKEN}` },
+      signal: AbortSignal.timeout(5000),
+    });
+    status = res.status;
+    if (status === 200) {
+      console.log(`[gate] /gateway/bot sehat (percobaan ${n}) — lanjut login`);
+      break;
+    }
+    const retryAfter = Number(res.headers.get('retry-after'));
+    if (Number.isFinite(retryAfter) && retryAfter > 0) wait = Math.min(retryAfter * 1000, 120_000);
+    detail = ` retry-after=${res.headers.get('retry-after') ?? '-'} scope=${res.headers.get('x-ratelimit-scope') ?? '-'}`;
   } catch (err) {
-    console.log(`[probe] ${url} GAGAL: ${err.message} (${Date.now() - t}ms)`);
+    detail = ` ${err.message}`;
   }
+  if (n >= 30) {
+    console.error('[fatal] /gateway/bot masih tidak sehat setelah ~30 menit — exit untuk percobaan baru');
+    process.exit(1);
+  }
+  console.warn(`[gate] /gateway/bot HTTP ${status}${detail} — tunggu ${Math.round(wait / 1000)}s (percobaan ${n})`);
+  await sleep(wait);
 }
+
+armWatchdog();
 
 retry('login', () => client.login(TOKEN), 20).catch((err) => {
   console.error(`[fatal] gagal login: ${err.message}`);
